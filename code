@@ -1,0 +1,134 @@
+# Study-on-Factors-that-Influence-2010-Boston-Marathon-Finish-Time
+Code for "Study on Factors that Influence 2010 Boston Marathon Finish Time" Project with R
+
+# Botson Marathon
+# Tianjia Chen
+
+bm <- read.csv("boston2010_5000.txt", stringsAsFactors = FALSE, header = TRUE, sep = " ")
+
+# Get average speed in each time split.
+newhalfmar <- 20/(bm$K0.5 + bm$K5.10 + bm$K10.15 + bm$K15.20)
+x <- data.frame(age = bm$Age, gender = bm$Gender1F2M, 
+                k5 = 5/bm$K0.5, k10 = 5/bm$K5.10, k15 = 5/bm$K10.15,
+                k20 = 5/bm$K15.20, k25 = 5/bm$K20.25, k30 = 5/bm$K25.30, 
+                k35 = 5/bm$K30.35, k40 = 5/bm$K35.40, khalf = newhalfmar,
+                kfinal = bm$K40.Fin)
+
+# 1, Do runners have different speed pattern?
+
+# look at the variance of speed for each runner.
+par(mfrow = c(1,1))
+y <- apply(x[,3:10], 1, var)
+plot(y, main = " ", xlab = "Number of runners", ylab = "variance")
+
+# Yes, some of them have very small variance, while some of them have huge one.
+# Very typical two of them
+
+plot(1:8, x[1, 3:10], main = " ", ylim = c(0.14, 0.21), 
+     type = "l", col = "blue", xlab = "Course", ylab = "Speed (KM/m)")
+points(1:8, x[2, 3:10], type = "l", col = "red")
+legend("bottomleft", c("Runner 1", "Runner 2"), pch = c("l","l"), 
+       col = c("red", "blue"), cex = 0.5)
+
+# Heartbreak Hill
+Heartbreak <- x[,9]-x[,8]
+sum(Heartbreak>0)/5000 
+# 75% of runners didn't go through Heartbreak Hill
+# Only consider about speed change 1-4 and 6-8
+
+# Factor 1: speed change
+
+# Look into the factor: same speed change may have different average speed, on different level.
+# Combine cluster analysis to find out groups.
+mydata1 <- data.frame(change1 = x[,6] - x[,3], change2 = x[,9] - x[,8])
+mydata <- scale(mydata1)
+d <- dist(mydata, method = "euclidean") # distance matrix
+fit <- hclust(d, method="ward.D") 
+plot(fit) # display dendogram
+# draw dendogram with red borders around the 3 clusters 
+rect.hclust(fit, k=3, border="red")
+groups <- cutree(fit, k=3) # cut tree into 5 clusters
+x1 = x[groups == 1,]
+x2 = x[groups == 2,]
+x3 = x[groups == 3,]
+par(mfrow = c(1,3))
+plot(x1[,3], x1[,10], main = "group 1", 
+     xlab = "K0-5 Speed (km/mmin)", ylab = "Final Split Speed (km/mmin)")
+plot(x2[,3], x2[,10], main = "group 2", 
+     xlab = "K0-5 Speed (km/mmin)", ylab = "Final Split Speed (km/mmin)")
+plot(x2[,3], x2[,10], main = "group 3", 
+     xlab = "K0-5 Speed (km/mmin)", ylab = "Final Split Speed (km/mmin)")
+cor(x1[,3], x1[,10])
+cor(x2[,3], x2[,10])
+cor(x3[,3], x3[,10])
+# Consider initial speed in the model, because in each group they can influence the result.
+
+
+# Factor 2: Gender
+# EDA:
+# Different gender has different final split level.
+boxplot(x$kfinal ~ x$gender, xlab = "Gender", ylab = "Time for Final Split(min)")
+
+# Different gender has different initial speed.
+boxplot(x$k5 ~ x$gender, xlab = "Gender", ylab = "Initial Speed (KM/min)")
+
+
+# Different gender has different speed patterns.
+speedpattern <- apply(mydata, 1,
+  function(x) {
+    if (x[1] > 0 & x[2] > 0) return(4)
+    else if (x[1] > 0 & x[2] < 0) return(3)
+    else if (x[1] < 0 & x[2] > 0) return(2)
+    else return (1)
+  }
+  )
+par(mfrow = c(1,1))
+hist(speedpattern[x$gender == 1], freq = FALSE, col = rgb(0,0,1,1/4),
+     xlab = "Speed Pattern", ylab = "Density", main = " ")
+hist(speedpattern[x$gender == 2], freq = FALSE, add = T, col = rgb(1,0,0,1/4))
+legend("topleft", c("Female","Male"), pch = 15, col = c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)), cex = 0.5)
+
+
+# Factor 3: Age
+# EDA:
+par(mfrow = c(1,1))
+hist(x$age, xlab = "Age", ylab = "Number of Runners", main = " ")
+boxplot(x$age ~ x$gender, xlab = "Gender", ylab = "Age", main = " ")
+# Is age strongly correlated with final split time?
+x_f <- subset(x, gender == 1)
+x_m <- subset(x, gender == 2)
+plot(x_f$age, x_f$kfinal, main = "Final Split Time Under Different Ages",
+     xlab = "Age", ylab = "Final Split Time (minutes)", col = "red")
+points(x_m$age, x_m$kfinal, col = "blue")
+legend("topright", c("Female", "Male"), pch = 1, col = c("red", "blue"), cex = 0.7)
+# May not expect internation between age and gender?
+
+
+
+# Modelling
+x$gender <- as.factor(x$gender)
+lm1 <- lm(bm$K35.40 ~ x$age + x$gender + x$k5 + mydata1$change1 + mydata1$change2
+          + x$age*x$gender + x$k5*x$gender + mydata1$change1*x$gender + 
+            mydata1$change2*x$gender)
+summary(lm1)
+plot(lm1)
+
+
+library(alr3)
+powerTransform(bm$K35.40)
+
+check <- data.frame(Age = x$age, InitialSpeed = x$k5, 
+                    Diffspeed1 = mydata1$change1, Diffspeed2 = mydata1$change2)
+pairs(check)
+
+lm2 <- lm(log(bm$K35.40) ~ x$age + x$gender + x$k5 + mydata1$change1 + mydata1$change2
+          + x$k5*x$gender + mydata1$change1*x$gender + mydata1$change2*x$gender
+          + x$age*x$gender)
+summary(lm2)
+
+
+lm3 <- lm(log(bm$K35.40) ~ x$age + x$gender + x$k5 + mydata1$change2 + mydata1$change1
+          + x$k5*x$gender + mydata1$change2*x$gender)
+summary(lm3)
+plot(lm3)
+
